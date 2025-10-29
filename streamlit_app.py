@@ -1,248 +1,437 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
-st.title("🎈 My new app")
-st.write(
-    "Let's start building! For help and inspiration, head over to [docs.streamlit.io](https://docs.streamlit.io/)."
-)
-import streamlit as st
-from itertools import product
-from math import comb
+st.set_page_config(page_title="모눈 위 최단 경로 시각화 (A->...->B)", layout="centered")
 
-st.set_page_config(page_title="모눈종이 최단경로 계산기", layout="wide")
+st.title("모눈 위 최단 경로 시각화")
 
-# ...existing code...
-st.title("🎈 모눈종이 최단경로 계산기")
-st.write("한 칸 크기 1, 대각선 불가. A에서 출발하여 입력한 순서대로 모든 점을 지나 B로 가는 '전체 최단경로'의 경우의 수와 경로들을 확인합니다.")
+st.write("👣 **A**에서 출발해 **클릭한 경유지들을 순서대로** 모두 거쳐 **B**에 도착하는 최단 경로를 확인해보세요!")
+st.markdown("**(클릭 순서: A $\to$ B $\to$ C $\to$ D... 이 경우 경로는 A $\to$ C $\to$ D $\to$ B 가 됩니다)**")
 
-# 유틸리티: 문자열 -> 좌표 파싱
-def parse_point(s, default=None):
-    try:
-        parts = [p.strip() for p in s.split(",")]
-        if len(parts) != 2:
-            return default
-        return (int(parts[0]), int(parts[1]))
-    except:
-        return default
+# HTML + JS 코드
+html_code = """
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: "Noto Sans KR", sans-serif;
+    background: #f6f8fb;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .controls {
+    margin-bottom: 10px;
+  }
+  button {
+    margin: 5px;
+    padding: 6px 14px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    background-color: #4a90e2;
+    color: white;
+  }
+  button:hover { background-color: #357ab8; }
+  #canvas {
+    border: 1px solid #888;
+    background-color: white;
+    margin-bottom: 15px;
+  }
+  #result { margin: 8px; font-weight: bold; }
+  /* **수정된 부분: 가로 배열 유지 + 줄 바꿈 (flex-wrap: wrap)** */
+  #examples { 
+    display: flex; 
+    flex-direction: row; /* 가로 방향으로 요소들을 배치 */
+    flex-wrap: wrap; /* 요소들이 넘칠 경우 다음 줄로 내려가게 함 (배열 깨짐 방지) */
+    gap: 15px; /* 항목 간 간격 */
+    justify-content: center; /* 중앙 정렬 */
+    width: 100%; /* 너비 꽉 채움 */
+    padding: 10px;
+  }
+  .path-example {
+    border: 1px solid #ccc;
+    background: #fff;
+    padding: 5px;
+    /* 사례 크기 조정이 용이하도록 너비를 제한 (필요시 조정) */
+    box-sizing: border-box; 
+  }
+  .path-info {
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+      margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="controls">
+    <button id="init">초기화</button>
+    <button id="calculate">경우의 수 구하기</button>
+    <button id="show">사례보기</button>
+    <button id="grid3">3×3</button>
+    <button id="grid4">4×4</button>
+    <button id="grid5">5×5</button>
+  </div>
+  <canvas id="canvas" width="420" height="420"></canvas>
+  <div id="result"></div>
+  <div id="examples"></div>
 
-# 세션 상태 초기화
-if "A" not in st.session_state:
-    st.session_state.A = "0,0"
-if "B" not in st.session_state:
-    st.session_state.B = "3,2"
-if "intermediates" not in st.session_state:
-    st.session_state.intermediates = "1,0;2,1"
-if "examples_set" not in st.session_state:
-    st.session_state.examples_set = False
+<script>
+let n = 4; // 기본 4x4
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+let points = {};
+let clickOrder = []; // 클릭된 모든 점의 순서 (A, B, C, D...)
+let pathOrder = []; // 실제로 경로 계산에 사용될 순서 (A, C, D..., B)
+let gap = 80;
+const MAX_EXAMPLES_TO_DISPLAY = 500; // 시각화 최대 개수 (총 경로가 이보다 적으면 모두 표시)
+const MAX_PATH_GENERATION_LIMIT = 100000; // 경로 생성 알고리즘이 멈추는 기준
 
-col1, col2 = st.columns([2, 1])
+// 경로 계산에 사용할 순서 배열을 업데이트하는 함수
+function updatePathOrder() {
+    pathOrder = [];
+    if (points.A) pathOrder.push("A");
+    
+    // C, D, E... (인덱스 2부터) 를 A와 B 사이에 순서대로 추가
+    for (let i = 2; i < clickOrder.length; i++) {
+        pathOrder.push(clickOrder[i]);
+    }
 
-with col1:
-    st.markdown("### 좌표 입력")
-    st.text("좌표는 정수 x,y 형식. 여러 중간점은 세미콜론(;)으로 구분합니다. 입력 순서대로 지나갑니다.")
-    st.session_state.A = st.text_input("출발점 A", value=st.session_state.A)
-    st.session_state.intermediates = st.text_area("중간점 (없으면 비워두기) — 예: 1,0;2,1", value=st.session_state.intermediates, height=80)
-    st.session_state.B = st.text_input("도착점 B", value=st.session_state.B)
+    if (points.B) pathOrder.push("B");
+}
 
-with col2:
-    st.markdown("### 작업")
-    if st.button("예시보기"):
-        # 예시값 설정
-        st.session_state.A = "0,0"
-        st.session_state.intermediates = "1,0;2,1"
-        st.session_state.B = "3,2"
-        st.session_state.examples_set = True
-        st.experimental_rerun()
+function drawGrid() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = "#aaa";
+  ctx.lineWidth = 1;
+  // 모눈선 그리기
+  for (let i = 0; i <= n; i++) {
+    ctx.beginPath();
+    ctx.moveTo(40, 40 + i*gap);
+    ctx.lineTo(40 + n*gap, 40 + i*gap);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(40 + i*gap, 40);
+    ctx.lineTo(40 + i*gap, 40 + n*gap);
+    ctx.stroke();
+  }
+  // 점 그리기
+  for (const [key, {x, y}] of Object.entries(points)) {
+    ctx.beginPath();
+    ctx.arc(40 + x*gap, 40 + y*gap, 8, 0, Math.PI*2);
+    // A는 빨강, B는 파랑, 나머지는 주황
+    ctx.fillStyle = key==="A"?"#ff6f61":key==="B"?"#4a90e2":"#f5b041";
+    ctx.fill();
+    ctx.fillStyle = "white";
+    ctx.font = "bold 12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(key, 40 + x*gap, 40 + y*gap);
+  }
+}
 
-    if st.button("초기화"):
-        st.session_state.A = "0,0"
-        st.session_state.intermediates = ""
-        st.session_state.B = "0,0"
-        st.experimental_rerun()
+canvas.addEventListener("click", (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.round((e.clientX - rect.left - 40)/gap);
+  const y = Math.round((e.clientY - rect.top - 40)/gap);
+  if (x < 0 || x > n || y < 0 || y > n) return;
+  
+  let label;
+  if (!points.A) {
+    label = "A";
+  } else if (!points.B) {
+    label = "B";
+  } else {
+    // C, D, E... 순서로 추가
+    let i = clickOrder.length;
+    label = String.fromCharCode(65 + i); 
+    if (i >= 26) return; // 너무 많은 점 방지
+  }
 
-    compute = st.button("경우의 수 구하기")
+  points[label] = {x, y};
+  if (!clickOrder.includes(label)) {
+    clickOrder.push(label);
+  }
+  updatePathOrder();
+  drawGrid();
+});
 
-st.markdown("---")
+// 팩토리얼 함수
+function factorial(num){ 
+  if (num < 0) return 0;
+  let result = 1;
+  for (let i = 2; i <= num; i++) {
+    result *= i;
+  }
+  return result; 
+}
 
-# 파싱
-A = parse_point(st.session_state.A)
-B = parse_point(st.session_state.B)
-intermediate_str = st.session_state.intermediates.strip()
-intermediates = []
-if intermediate_str != "":
-    for part in intermediate_str.split(";"):
-        p = parse_point(part.strip())
-        if p is None:
-            st.error(f"중간점 입력 형식 오류: '{part}'")
-            intermediates = None
-            break
-        intermediates.append(p)
+// 조합 함수 nCr
+function comb(n,r){ 
+  if (r < 0 || r > n) return 0;
+  if (r === 0 || r === n) return 1;
+  if (r > n / 2) r = n - r; 
 
-if A is None or B is None or intermediates is None:
-    st.stop()
+  let res = 1;
+  for (let i = 1; i <= r; i++) {
+    res = res * (n - i + 1) / i;
+  }
+  return res;
+}
 
-points = [A] + intermediates + [B]
-labels = ["A"] + [f"C{i+1}" for i in range(len(intermediates))] + ["B"]
+// 두 지점 사이의 최단 경로 개수 (같은 것을 포함하는 순열)
+function pathCount(p1,p2){
+  const dx=Math.abs(p1.x-p2.x);
+  const dy=Math.abs(p1.y-p2.y);
+  
+  // p2의 좌표가 p1보다 크거나 같은 경우 (오른쪽/아래 이동)만 허용
+  if (p2.x < p1.x || p2.y < p1.y) {
+    return 0; 
+  }
+  return comb(dx+dy,dx);
+}
 
-# 경로 생성 유틸리티
-def segment_moves(s, e):
-    dx = e[0] - s[0]
-    dy = e[1] - s[1]
-    moves = []
-    if dx > 0:
-        moves += ["R"] * dx
-    elif dx < 0:
-        moves += ["L"] * (-dx)
-    if dy > 0:
-        moves += ["U"] * dy
-    elif dy < 0:
-        moves += ["D"] * (-dy)
-    return moves  # multiset of moves; shortest path has len = |dx|+|dy|
+// 모든 지점을 순서대로 지나는 최단 경로의 총 개수 계산
+document.getElementById("calculate").addEventListener("click", ()=>{
+  if(pathOrder.length < 2){ 
+    document.getElementById("result").textContent="최소 두 지점(A와 B)을 지정하세요."; return;
+  }
+  let total=1;
+  let pathPossible = true;
 
-def count_shortest_between(s, e):
-    dx = abs(e[0] - s[0])
-    dy = abs(e[1] - s[1])
-    # 조합으로 계산: (dx+dy) choose dx
-    return comb(dx + dy, dx)
+  // pathOrder 배열에 지정된 순서대로 각 구간의 경로 개수를 곱함
+  for(let i=0;i<pathOrder.length-1;i++){
+    const count = pathCount(points[pathOrder[i]],points[pathOrder[i+1]]);
+    if (count === 0) {
+      pathPossible = false;
+      total = 0;
+      break;
+    }
+    total *= count;
+  }
 
-# 중복 순열 생성 (멀티셋의 모든 순열) — 재귀
-def multiset_permutations(moves_counts):
-    # moves_counts: dict move->count
-    total = sum(moves_counts.values())
-    moves = list(moves_counts.keys())
-    def helper(curr_counts):
-        if sum(curr_counts.values()) == 0:
-            yield []
-            return
-        for m in moves:
-            if curr_counts[m] > 0:
-                curr_counts[m] -= 1
-                for rest in helper(curr_counts):
-                    yield [m] + rest
-                curr_counts[m] += 1
-    yield from helper(moves_counts.copy())
+  if (pathPossible && total > MAX_PATH_GENERATION_LIMIT) { 
+      document.getElementById("result").textContent=`총 최단거리 경로 수: ${total} 가지 (경우의 수가 너무 많아 시각화는 제한됩니다)`;
+  } else if (!pathPossible) {
+      document.getElementById("result").textContent=`총 최단거리 경로 수: 0 가지 (지점 간의 순서가 최단 경로 조건을 만족하지 않습니다)`;
+  } else {
+      document.getElementById("result").textContent=`총 최단거리 경로 수: ${total} 가지`;
+  }
+});
 
-# 각 세그먼트에서 가능한 모든 최소 경로(문자열 리스트) 생성, 제한 적용
-MAX_PATHS_DISPLAY = 300  # 화면에 표시할 최대 전체 경로 수
-MAX_PER_SEGMENT_ENUM = 200  # 각 세그먼트에서 열거 허용수 (안전)
+// A에서 B까지 모든 중간 지점을 지나는 모든 경로 생성 (DFS 기반)
+function generatePaths(){
+  const allPaths = [];
+  let currentTotalPaths = 1;
+  
+  // pathOrder에 따라 각 구간별 경로를 생성하고 결합
+  for(let i=0;i<pathOrder.length-1;i++){
+    const p1 = points[pathOrder[i]];
+    const p2 = points[pathOrder[i+1]];
+    const segmentPaths = [];
 
-segments = list(zip(points[:-1], points[1:]))
+    // 최단 경로 조건 확인
+    if (p2.x < p1.x || p2.y < p1.y) {
+        return []; // 최단 경로 불가
+    }
 
-# 계산 버튼 동작
-if compute:
-    # 총 경우의 수 계산 (조합의 곱)
-    total_count = 1
-    segment_counts = []
-    for s, e in segments:
-        cnt = count_shortest_between(s, e)
-        segment_counts.append(cnt)
-        total_count *= cnt
+    function dfs(x,y,path){
+      // 경로 수가 너무 많아지면 경로 생성을 중단합니다. (시각화 부담 최소화)
+      if (currentTotalPaths > MAX_PATH_GENERATION_LIMIT) return; 
 
-    st.success(f"전체 최단거리 경우의 수: {total_count:,}")
+      if(x===p2.x && y===p2.y){ 
+        segmentPaths.push([...path]);
+        return; 
+      }
+      if(x<p2.x) dfs(x+1,y,[...path,"R"]); // Right
+      if(y<p2.y) dfs(x,y+1,[...path,"D"]); // Down
+    }
+    dfs(p1.x,p1.y,[]);
+    allPaths.push(segmentPaths);
+    
+    // 다음 구간으로 넘어가기 전에 현재까지의 총 경로 개수를 업데이트하고 제한 확인
+    currentTotalPaths *= segmentPaths.length;
+    if (currentTotalPaths > MAX_PATH_GENERATION_LIMIT) break;
+  }
 
-    # 경로가 너무 많을 경우 경고
-    if total_count > 1000000:
-        st.warning("경우의 수가 매우 큽니다. 전체 경로를 열거하지 않고 개수만 표시합니다.")
-        st.stop()
+  // 모든 구간 경로를 결합하여 최종 경로 생성
+  if (allPaths.length === 0) return [];
+  
+  let finalPaths = allPaths[0];
 
-    # 각 세그먼트에 대해 실제 경로 열거 (제한 적용)
-    all_segment_paths = []
-    segment_enumeration_ok = True
-    for idx, (s, e) in enumerate(segments):
-        moves = segment_moves(s, e)
-        # 카운트별로 멀티셋 구성
-        counts = {}
-        for m in moves:
-            counts[m] = counts.get(m, 0) + 1
-        cnt = segment_counts[idx]
-        if cnt > MAX_PER_SEGMENT_ENUM:
-            st.info(f"세그먼트 {idx+1} ({labels[idx]} -> {labels[idx+1]}) 의 경우의 수 {cnt} 가 너무 커서 열거를 제한합니다.")
-            segment_enumeration_ok = False
-            break
-        # 열거
-        seg_paths = []
-        for perm in multiset_permutations(counts):
-            seg_paths.append("".join(perm))
-        all_segment_paths.append(seg_paths)
+  for (let i = 1; i < allPaths.length; i++) {
+    const nextSegmentPaths = allPaths[i];
+    const newFinalPaths = [];
+    for (const p1 of finalPaths) {
+      for (const p2 of nextSegmentPaths) {
+        newFinalPaths.push([...p1, ...p2]);
+        // 결합 과정에서도 경로 개수가 시각화 제한을 넘으면 즉시 중단
+        if (newFinalPaths.length >= MAX_EXAMPLES_TO_DISPLAY) { 
+            return newFinalPaths; 
+        }
+      }
+    }
+    finalPaths = newFinalPaths;
+  }
 
-    if not segment_enumeration_ok:
-        st.stop()
+  return finalPaths;
+}
 
-    # 전체 경로(세그먼트들의 카르테시안 곱)
-    full_paths_iter = product(*all_segment_paths)
-    full_paths = []
-    for idx, seg_tuple in enumerate(full_paths_iter):
-        # seg_tuple는 각 세그먼트의 move 문자열
-        full_path = "".join(seg_tuple)
-        full_paths.append(full_path)
-        if len(full_paths) >= MAX_PATHS_DISPLAY:
-            break
+// 경로 시각화
+document.getElementById("show").addEventListener("click", ()=>{
+  const exDiv=document.getElementById("examples");
+  exDiv.innerHTML="";
+  
+  if(pathOrder.length < 2){ 
+    exDiv.textContent="최소 두 지점(A와 B)을 먼저 지정하세요."; return;
+  }
+  
+  const paths=generatePaths();
+  const totalPathsCount = paths.length;
+  const numToDisplay = Math.min(totalPathsCount, MAX_EXAMPLES_TO_DISPLAY);
 
-    st.info(f"열거된 전체 경로 수 (표시 한도 {MAX_PATHS_DISPLAY}): {len(full_paths)} / {total_count}")
+  if (totalPathsCount === 0) {
+      document.getElementById("result").textContent=`총 최단거리 경로 수: 0 가지 (지점 간의 순서가 최단 경로 조건을 만족하지 않습니다)`;
+      exDiv.textContent="조건을 만족하는 최단 경로가 없습니다.";
+      return;
+  }
 
-    # 경로를 격자에 그려 출력
-    grids = []
-    # bounding box 계산 (전체 경로를 포함할 수 있게 각 포인트 범위로)
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
-    minx, maxx = min(xs), max(xs)
-    miny, maxy = min(ys), max(ys)
+  // 경우의 수 안내 문구
+  const pathCalcTotal = parseInt(document.getElementById("result").textContent.match(/:\s*(\d+)/)[1]);
+  const infoDiv=document.createElement("div");
+  infoDiv.className="path-info";
+  if (pathCalcTotal > MAX_EXAMPLES_TO_DISPLAY) {
+      infoDiv.textContent=`총 ${pathCalcTotal}가지 경로 중 ${numToDisplay}가지 사례를 표시합니다.`;
+  } else {
+      infoDiv.textContent=`총 ${totalPathsCount}가지 사례를 표시합니다.`;
+  }
+  exDiv.appendChild(infoDiv);
 
-    # 경로가 공간을 벗어날 수 없으므로 위 bbox로 충분
-    pad = 1
-    minx -= pad
-    maxx += pad
-    miny -= pad
-    maxy += pad
 
-    width = maxx - minx + 1
-    height = maxy - miny + 1
+  // A에서 B까지의 전체 모눈 크기 계산 (시각화용)
+  const allX = pathOrder.map(key => points[key].x);
+  const allY = pathOrder.map(key => points[key].y);
+  const minX = Math.min(...allX);
+  const minY = Math.min(...allY);
+  const maxX = Math.max(...allX);
+  const maxY = Math.max(...allY);
 
-    def render_path_to_grid(path_moves):
-        # 초기 빈 격자
-        grid = [[" ." for _ in range(width)] for _ in range(height)]
-        # 위치 마크 함수
-        def mark(x, y, ch):
-            gx = x - minx
-            gy = maxy - y  # 화면은 위가 큰 y -> index
-            if 0 <= gy < height and 0 <= gx < width:
-                grid[gy][gx] = f"{ch:>2}"
-        # 마커: A, C1.., B
-        for lab, p in zip(labels, points):
-            mark(p[0], p[1], lab)
+  const totalDx = maxX - minX;
+  const totalDy = maxY - minY;
 
-        # 따라가기
-        x, y = points[0]
-        for mv in path_moves:
-            if mv == "R":
-                x += 1
-            elif mv == "L":
-                x -= 1
-            elif mv == "U":
-                y += 1
-            elif mv == "D":
-                y -= 1
-            # 마커가 이미 문자일 수 있으므로 우선적으로 A/C/B 유지
-            gx = x - minx
-            gy = maxy - y
-            if 0 <= gy < height and 0 <= gx < width:
-                current = grid[gy][gx].strip()
-                if current in ("A", "B") or (current.startswith("C")):
-                    # 보존
-                    pass
-                else:
-                    grid[gy][gx] = " *"
-        # 문자열화
-        rows = ["".join(cell for cell in row) for row in grid]
-        return "\n".join(rows)
+  const scale=25; // 미니 캔버스 셀 크기
+  const maxMiniSize = 250; // 최대 캔버스 크기 제한
+  const canvasWidth = 10 + totalDx * scale + 10;
+  const canvasHeight = 10 + totalDy * scale + 10;
+  let skippedCount = 0;
 
-    st.markdown("### 예시 경로 (텍스트 격자 표시)")
-    for i, fp in enumerate(full_paths):
-        st.markdown(f"**경로 #{i+1}** (moves: {fp})")
-        grid_text = render_path_to_grid(fp)
-        st.code(grid_text, language=None)
 
-    if total_count > len(full_paths):
-        st.markdown("...생략됨 (경우의 수가 많아 일부만 표시했습니다).")
+  paths.slice(0, numToDisplay).forEach((path,i)=>{
+    const mini=document.createElement("canvas");
+    
+    // 미니 캔버스 크기 조정
+    if (canvasWidth > maxMiniSize || canvasHeight > maxMiniSize) {
+        skippedCount++;
+        return; 
+    }
+    mini.width = canvasWidth;
+    mini.height = canvasHeight;
+    
+    const c=mini.getContext("2d");
+    
+    // 모눈 그리기
+    c.strokeStyle="#eee"; 
+    c.lineWidth = 1;
+    for(let j=0;j<=totalDy;j++){
+      c.beginPath();
+      c.moveTo(10,10+j*scale);
+      c.lineTo(10+totalDx*scale,10+j*scale);
+      c.stroke();
+    }
+    for(let j=0;j<=totalDx;j++){
+      c.beginPath();
+      c.moveTo(10+j*scale,10);
+      c.lineTo(10+j*scale,10+totalDy*scale);
+      c.stroke();
+    }
+    
+    // 경로 그리기
+    let cx = 10 + (points.A.x - minX) * scale;
+    let cy = 10 + (points.A.y - minY) * scale;
+    
+    c.beginPath();
+    c.moveTo(cx,cy);
+    
+    path.forEach(step=>{
+      if(step==="R") cx+=scale;
+      else if(step==="D") cy+=scale;
+      c.lineTo(cx,cy); // 경로 그리기
+    });
+    
+    c.strokeStyle="#ff6f61";
+    c.lineWidth=2;
+    c.stroke();
+    
+    // 모든 지점 (경유지 포함) 마커
+    pathOrder.forEach(key => {
+        const p = points[key];
+        const markerX = 10 + (p.x - minX) * scale;
+        const markerY = 10 + (p.y - minY) * scale;
+        
+        let color = key==="A"?"#ff6f61":key==="B"?"#4a90e2":"#f5b041";
+        
+        c.fillStyle = color;
+        c.beginPath();
+        c.arc(markerX, markerY, 4, 0, Math.PI*2);
+        c.fill();
+        
+        c.fillStyle = "white";
+        c.font = "bold 8px sans-serif";
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.fillText(key, markerX, markerY);
+    });
 
-else:
-    st.info("좌표를 입력하고 '경우의 수 구하기' 버튼을 눌러 결과를 확인하세요.")
+
+    const div=document.createElement("div");
+    div.className="path-example";
+    div.appendChild(mini);
+    exDiv.appendChild(div);
+  });
+  
+  if (skippedCount > 0) {
+     exDiv.innerHTML += `<p style='width: 100%; text-align: center;'>* 모눈 크기(${totalDx}x${totalDy})가 너무 커서 ${skippedCount}개 사례의 시각화가 생략되었습니다. *</p>`;
+  }
+});
+
+document.getElementById("init").addEventListener("click", ()=>{
+  points={}; clickOrder=[]; pathOrder=[];
+  document.getElementById("result").textContent="";
+  document.getElementById("examples").innerHTML="";
+  drawGrid();
+});
+
+document.getElementById("grid3").addEventListener("click", ()=>{ n=3; gap=100; resizeCanvas(); });
+document.getElementById("grid4").addEventListener("click", ()=>{ n=4; gap=80; resizeCanvas(); });
+document.getElementById("grid5").addEventListener("click", ()=>{ n=5; gap=60; resizeCanvas(); });
+
+function resizeCanvas(){
+  canvas.width = 40 + n*gap + 40;
+  canvas.height = 40 + n*gap + 40;
+  points={}; clickOrder=[]; pathOrder=[];
+  document.getElementById("result").textContent="";
+  document.getElementById("examples").innerHTML="";
+  drawGrid();
+}
+
+drawGrid();
+</script>
+</body>
+</html>
+"""
+
+components.html(html_code, height=12000)
