@@ -727,9 +727,6 @@ document.getElementById("show").addEventListener("click", ()=>{
       return;
   }
   
-  // 메시지를 exDiv 내 첫 번째 요소로 추가 (CSS의 order: -1과 width: 100% 덕분에 항상 최상단에 표시됨)
-  infoDiv.textContent=`총 ${totalPathsCount > MAX_EXAMPLES_TO_DISPLAY ? MAX_EXAMPLES_TO_DISPLAY : totalPathsCount}가지 사례를 표시합니다.`; 
-  exDiv.appendChild(infoDiv);
 
 
   // 시각화 로직
