@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 # 페이지 설정 (중앙 정렬 유지)
 st.set_page_config(page_title="모눈종이 최단 경로 시뮬레이터", layout="centered")
 
-st.markdown('<h1 style="text-align: center; color: #333; font-family: \'Noto Sans KR\', sans-serif;">🗺️ 모눈 종이 최단 경로 시뮬레이터</h1>', unsafe_allow_html=True)
+st.markdown('<h1 style="text-align: center; color: #333; font-family: \'Noto Sans KR\', sans-serif;">모눈 위 최단 경로 시뮬레이터</h1>', unsafe_allow_html=True)
 
 # UI 개선된 조작 방식 안내 (표 디자인 및 너비 조정)
 st.markdown("""
@@ -96,9 +96,34 @@ html_code = """
     display: flex;
     flex-direction: column;
     align-items: center; /* 내부 요소 중앙 정렬 */
-    width: 95%; 
-    max-width: 900px;
+    width: 95%; /* Streamlit 컨테이너 내에서 가능한 최대 너비 */
+    max-width: 900px; /* 불필요한 확장 방지 */
   }
+    /* Streamlit 중앙 정렬 환경에서 examples 영역을 넓게 사용하기 위한 별도 설정 */
+  #examples { 
+    width: 100%; /* 부모 컨테이너 내에서 100% 사용 */
+    display: flex; 
+    flex-direction: row; 
+    flex-wrap: wrap; 
+    gap: 15px; 
+    justify-content: center; 
+    padding: 10px;
+    margin-top: 10px;
+    max-width: 800px; /* 사례 목록의 최대 너비를 지정하여 깔끔하게 중앙 정렬 */
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .path-example { 
+    /* 3열 레이아웃: 100% / 3 - 간격 조정 */
+    width: calc(33.333% - 14px); 
+    min-width: 150px; /* 최소 너비 유지 */
+    border: 1px solid #ccc; 
+    background: #fff; 
+    padding: 5px; 
+    box-sizing: border-box; 
+    border-radius: 6px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
 
   .controls { 
     margin-bottom: 25px; 
@@ -156,31 +181,15 @@ html_code = """
     text-align: center;
     width: 80%;
 }
-  #examples { 
-    width: 100%; 
-    display: flex; 
-    flex-direction: row; 
-    flex-wrap: wrap; 
-    gap: 15px; 
-    justify-content: center; 
-    padding: 10px;
-    margin-top: 10px;
-  }
-  .path-example { 
-    border: 1px solid #ccc; 
-    background: #fff; 
-    padding: 5px; 
-    box-sizing: border-box; 
-    border-radius: 6px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-}
+
   .path-info { 
-    width: 100%; 
+    width: 100%; /* 이 요소가 항상 한 줄 전체를 차지하도록 합니다. */
     text-align: center; 
     font-size: 16px; 
     margin: 15px 0 10px 0;
     color: #555;
     font-weight: bold;
+    order: -1; /* flex 컨테이너에서 항상 가장 먼저 표시되도록 합니다. */
 }
   .option-group { 
     border: 1px solid #99d6ff; /* 하늘색 계열 테두리 */
@@ -239,7 +248,7 @@ let mandatoryEdges = {};
 let clickOrder = []; 
 let pathOrder = []; 
 let gap = 80;
-const MAX_EXAMPLES_TO_DISPLAY = 500; 
+const MAX_EXAMPLES_TO_DISPLAY = 500; 
 const MAX_PATHS_FOR_VISUALIZATION = 100000;
 
 function coordToKey(x, y) { return `${x},${y}`; }
@@ -718,8 +727,8 @@ document.getElementById("show").addEventListener("click", ()=>{
       return;
   }
   
-  // 간소화된 메시지: 총 [사례 개수]가지 사례를 표시합니다.
-  infoDiv.textContent=`총 ${numToDisplay}가지 사례를 표시합니다.`; 
+  // 메시지를 exDiv 내 첫 번째 요소로 추가 (CSS의 order: -1과 width: 100% 덕분에 항상 최상단에 표시됨)
+  infoDiv.textContent=`총 ${totalPathsCount > MAX_EXAMPLES_TO_DISPLAY ? MAX_EXAMPLES_TO_DISPLAY : totalPathsCount}가지 사례를 표시합니다.`; 
   exDiv.appendChild(infoDiv);
 
 
@@ -843,4 +852,4 @@ drawGrid();
 </html>
 """
 
-components.html(html_code, height=12000)
+components.html(html_code, height=18000)
